@@ -15,6 +15,8 @@ import (
 	"google.golang.org/appengine/log"
 	"google.golang.org/appengine/taskqueue"
 	"google.golang.org/appengine/urlfetch"
+	"google.golang.org/appengine/datastore"
+	"fmt"
 )
 
 var botHandler *httphandler.WebhookHandler
@@ -52,6 +54,10 @@ func handleCallback(evs []*linebot.Event, r *http.Request) {
 	taskqueue.AddMulti(c, ts, "")
 }
 
+type Entity struct {
+	Value string
+}
+
 // 受け取ったメッセージを処理する関数
 func handleTask(w http.ResponseWriter, r *http.Request) {
 	c := newContext(r)
@@ -80,6 +86,10 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logf(c, "==source==")
+	logf(c, "EventType: %s\nMessage: %#v", e.Source)
+	logf(c, "==source==")
+
 	logf(c, "EventType: %s\nMessage: %#v", e.Type, e.Message)
 
 	m := linebot.NewTextMessage("ok")
@@ -88,7 +98,31 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	c, r, w = writeDb(c, r, w)
+
 	w.WriteHeader(200)
+}
+
+func writeDb (c context.Context, r *http.Request, w http.ResponseWriter) {
+	logf(c, "==writedb==")
+	k := datastore.NewKey(c, "Entity", "stringID", 0, nil)
+	e := new(Entity)
+	if err := datastore.Get(c, k, e); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	old := e.Value
+	e.Value = r.URL.Path
+	if _, err := datastore.Put(c, k, e); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprintf(w, "old=%q\nnew=%q\n", old, e.Value)
+
+	logf(c, "==writedb return==")
+	return c, r, w
 }
 
 func newLINEBot(c context.Context) (*linebot.Client, error) {
